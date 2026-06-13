@@ -1,6 +1,7 @@
 import json, os, random, time, uuid
 from datetime import datetime, timezone
 from kafka import KafkaProducer
+from kafka.errors import NoBrokersAvailable
 
 BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
 TOPIC = os.getenv("KAFKA_TOPIC", "ecommerce_events")
@@ -17,11 +18,20 @@ PAYMENTS = ["card", "paypal", "mobile_money", "bank_transfer"]
 # Entonnoir réaliste : vue >> panier >> achat
 EVENT_TYPES = ["view"] * 4 + ["add_to_cart"] * 2 + ["purchase"]
 
-producer = KafkaProducer(
-    bootstrap_servers=BOOTSTRAP,
-    value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-    linger_ms=50,
-)
+
+def create_producer():
+    """Attend que Kafka soit prêt au lieu de planter au démarrage."""
+    while True:
+        try:
+            return KafkaProducer(
+                bootstrap_servers=BOOTSTRAP,
+                value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+                linger_ms=50,
+            )
+        except NoBrokersAvailable:
+            print("Kafka pas encore prêt, nouvelle tentative dans 5s...", flush=True)
+            time.sleep(5)
+
 
 def make_event():
     category = random.choice(list(CATEGORIES))
@@ -44,8 +54,10 @@ def make_event():
         evt["payment_method"] = random.choice(PAYMENTS)
     return evt
 
+
 if __name__ == "__main__":
-    print(f"Producing to {BOOTSTRAP} topic={TOPIC} at ~{EPS} eps", flush=True)
+    producer = create_producer()
+    print(f"Connecté. Production vers {BOOTSTRAP} topic={TOPIC} à ~{EPS} eps", flush=True)
     interval = 1.0 / EPS
     while True:
         producer.send(TOPIC, make_event())
